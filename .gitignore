@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# VS Code
+.vscode/
+
+# Результаты экспериментов
+lab_3/outputs/
+lab_4/outputs/
+
+# Временные файлы
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Виртуальные окружения
+venv/
+.venv/

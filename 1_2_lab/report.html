@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MELD · Cross-Attention + MTL — отчёт</title>
+<style>
+:root{--bg:#f4f4f1;--card:#fff;--ink:#0b0b0b;--muted:#52514e;--line:#e4e3df;--accent:#2a78d6;--good:#0f7b3f;--good-bg:#e3f4e9;--warn:#a34a00;--warn-bg:#fdeedd;--soft:#f8f8f6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:28px 20px 18px}
+.wrap{max-width:1040px;margin:0 auto}
+header h1{margin:0 0 4px;font-size:1.7rem;line-height:1.25}
+header p{margin:0;color:var(--muted)}
+nav{position:sticky;top:0;z-index:2;background:var(--card);border-bottom:1px solid var(--line);padding:8px 20px;overflow-x:auto;white-space:nowrap}
+nav a{color:var(--muted);text-decoration:none;margin-right:18px;font-size:.92rem}
+nav a:hover{color:var(--accent)}
+main{padding:24px 20px 60px}
+section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 26px;margin:0 0 20px}
+h2{margin:0 0 12px;font-size:1.3rem}
+h3{margin:22px 0 8px;font-size:1.05rem}
+img{display:block;max-width:100%;height:auto;margin:16px 0 4px;border:1px solid var(--line);border-radius:10px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.tile{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.tile .label{color:var(--muted);font-size:.9rem}
+.tile .value{font-size:2.4rem;font-weight:650;line-height:1.15;font-variant-numeric:tabular-nums}
+.tile .sub{color:var(--muted);font-size:.9rem;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;margin-top:8px;padding:2px 10px;border-radius:99px;font-size:.85rem;font-weight:600}
+.badge.good{background:var(--good-bg);color:var(--good)}
+.badge.warn{background:var(--warn-bg);color:var(--warn)}
+.up{color:var(--good);font-weight:600}
+.down{color:var(--warn);font-weight:600}
+.table{overflow-x:auto;margin:8px 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem;font-variant-numeric:tabular-nums}
+th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted);font-weight:600;background:var(--soft)}
+.note{color:var(--muted);font-size:.9rem}
+code{background:#eef0f4;padding:1px 5px;border-radius:4px;font-size:.88em}
+.changes{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.changes div{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.changes h3{margin:0 0 6px}
+.changes ul{margin:0;padding-left:18px}
+.changes li{margin:3px 0}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0}
+.flow span{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:.88rem}
+.flow b{color:var(--muted)}
+.arch{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+.arch div{border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--soft);font-size:.9rem}
+.arch .full{grid-column:1/-1;text-align:center}
+.arch .x{border-color:var(--accent);background:#eaf2fc}
+@media (max-width:640px){.arch{grid-template-columns:1fr}section{padding:18px 16px}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+<h1>Мультимодальное распознавание эмоций и тональности (MELD)</h1>
+<p>Cross-Attention (текст&nbsp;Q → аудио&nbsp;K/V) + Multi-Task Learning · устройство: {{DEVICE}} · эпох: {{EPOCHS}}</p>
+</div></header>
+<nav><div class="wrap">
+<a href="#summary">Итоги</a><a href="#compare">Было / стало</a><a href="#changes">Что сделано</a><a href="#data">Данные</a><a href="#audio">Предобработка аудио</a><a href="#arch">Архитектура</a><a href="#training">Обучение</a><a href="#results">Тест</a><a href="#attention">Внимание</a><a href="#conclusion">Выводы</a>
+</div></nav>
+<main class="wrap">
+
+<section id="summary">
+<h2>Итоги</h2>
+<div class="tiles">{{TILES}}</div>
+<p class="note">Метрики посчитаны на полной тестовой выборке MELD, которая не участвовала ни в обучении, ни в выборе эпохи. Цель работы — качество 0.6–0.7.</p>
+</section>
+
+<section id="compare">
+<h2>Сравнение с исходной версией</h2>
+{{COMPARISON}}
+</section>
+
+<section id="changes">
+<h2>Что сделано</h2>
+<p>Архитектура проекта сохранена: текст служит Query, аудио — Key/Value в <code>nn.MultiheadAttention</code>, затем residual, masked mean pooling, общий слой и две головы (эмоция и тональность) с общей функцией потерь. Изменения касаются данных, предобработки, входа текстовой ветки и процедуры обучения.</p>
+<div class="changes">
+<div><h3>Данные</h3><ul>
+<li>Весь MELD: 9988 / 1108 / 2610 реплик вместо 1200 / 250 / 250.</li>
+<li>Тест по всей выборке, а не по первым 250 клипам архива, поэтому оценка надёжнее.</li>
+<li>Типографские <code>’ “ ” — …</code> приводятся к ASCII: раньше <code>company’s</code> дробилось на части.</li>
+<li>Для каждой реплики сохраняются до 3 предыдущих реплик диалога (без меток); подключаются через <code>--context-turns</code>.</li>
+</ul></div>
+<div><h3>Предобработка аудио</h3><ul>
+<li>Удаление DC-смещения и нормализация громкости клипа.</li>
+<li>Pre-emphasis 0.97: усиление высоких частот речи.</li>
+<li>Обрезка тишины по краям (порог −35 дБ от максимума).</li>
+<li>К 20 MFCC добавлены log-энергия, Δ и ΔΔ: 63 признака вместо 20.</li>
+<li>64 шага с усреднением по сегментам вместо интерполяции до 32 шагов.</li>
+<li>Параллельная обработка на всех ядрах CPU при сборке.</li>
+</ul></div>
+<div><h3>Текстовая ветка</h3><ul>
+<li>Вместо <code>nn.Embedding</code> с нуля — дообучаемый предобученный RoBERTa-base и проекция 768 → 256.</li>
+<li>BPE-токенизатор вместо регулярки, длина до 128 токенов.</li>
+<li>Q и усреднение — только по токенам текущей реплики (<code>query_mask</code>).</li>
+<li>Старый вариант остаётся доступен: <code>"text_encoder": ""</code>.</li>
+</ul></div>
+<div><h3>Модель</h3><ul>
+<li>Hidden size 64 → 256, 4 головы внимания.</li>
+<li>Обучаемые позиции аудиокадров: K/V больше не неупорядоченное множество.</li>
+<li>LayerNorm после residual-сложения, dropout 0.1.</li>
+</ul></div>
+<div><h3>Обучение</h3><ul>
+<li>GPU (CUDA) и смешанная точность fp16 вместо CPU.</li>
+<li>AdamW с раздельным LR: 2e-5 для RoBERTa и 5e-4 для новых слоёв.</li>
+<li>Warmup 10 % и линейное затухание LR, gradient clipping 1.0.</li>
+<li>Проверка на dev после каждой эпохи; для теста берутся веса лучшей эпохи.</li>
+<li>Новая метрика weighted-F1 (стандартная для MELD).</li>
+</ul></div>
+<div><h3>Инфраструктура</h3><ul>
+<li>Docker: torch с CUDA, запуск <code>docker run --gpus all</code>, без yaml.</li>
+<li>Датасет и веса RoBERTa скачиваются при сборке, запуск работает без интернета.</li>
+<li>Загрузки докачиваются после обрывов сети и переключаются на зеркало MELD.</li>
+<li>Подробный отчёт на localhost с графиками и сравнением.</li>
+</ul></div>
+</div>
+</section>
+
+<section id="data">
+<h2>Данные</h2>
+<p>MELD — реплики из сериала <i>Friends</i> с видео и аудио, размеченные по 7 эмоциям и 3 классам тональности. Текст и аудио сопоставляются по <code>Dialogue_ID</code> / <code>Utterance_ID</code>; один битый клип train пропущен.</p>
+{{DATA}}
+</section>
+
+<section id="audio">
+<h2>Предобработка аудио</h2>
+<div class="flow">
+<span>MP4</span><b>→</b><span>FFmpeg: 16 кГц, моно</span><b>→</b><span>DC + нормализация громкости</span><b>→</b><span>Pre-emphasis 0.97</span><b>→</b><span>STFT 25/10 мс, Hann</span><b>→</b><span>Обрезка тишины</span><b>→</b><span>40 mel → log → DCT → 20 MFCC</span><b>→</b><span>+ log-энергия</span><b>→</b><span>+ Δ, ΔΔ</span><b>→</b><span>Усреднение до 64 шагов</span><b>→</b><span>z-норма по train</span>
+</div>
+<img src="audio_features.png" alt="Пример аудиопризнаков">
+<p class="note">Матрица признаков одного тестового клипа: по вертикали 63 признака (три блока), по горизонтали — 64 временных шага. Цвет показывает отклонение от среднего по train: красный выше, синий ниже.</p>
+</section>
+
+<section id="arch">
+<h2>Архитектура</h2>
+<div class="arch">
+<div><b>Текст</b><br>RoBERTa-base (дообучается) → Linear 768→256<br><small>(B, 128, 256) — Query</small></div>
+<div><b>Аудио</b><br>Linear 63→256 → ReLU → Dropout + позиции кадров<br><small>(B, 64, 256) — Key / Value</small></div>
+<div class="full x"><b>Cross-Attention</b> · MultiheadAttention(256, 4 головы): Q = текст, K = V = аудио</div>
+<div class="full">Residual <code>text + attended</code> → LayerNorm → masked mean pooling по токенам реплики → (B, 256)</div>
+<div class="full">Общий слой: Dropout → Linear 256→256 → ReLU → Dropout</div>
+<div><b>Голова эмоций</b><br>Linear 256→7</div>
+<div><b>Голова тональности</b><br>Linear 256→3</div>
+<div class="full">Loss = CE(эмоция) + CE(тональность): обе задачи обучают общие слои, cross-attention и энкодер</div>
+</div>
+</section>
+
+<section id="training">
+<h2>Обучение</h2>
+{{TRAINING}}
+</section>
+
+<section id="results">
+<h2>Результаты на тесте</h2>
+{{RESULTS}}
+</section>
+
+<section id="attention">
+<h2>Cross-modal attention</h2>
+{{EXAMPLE}}
+<img src="attention.png" alt="Карта внимания">
+<p class="note">Каждая строка — токен реплики (Query): как он распределяет внимание по 64 временным шагам аудио (Key/Value). Яркие участки — фрагменты звучания, из которых токен берёт акустическую информацию.</p>
+</section>
+
+<section id="conclusion">
+<h2>Выводы и ограничения</h2>
+<ul>
+<li>Основной прирост дали полный объём данных и предобученный текстовый энкодер: эмбеддинги, обученные с нуля на 1200 репликах, не успевали выучить семантику эмоций, и модель почти всегда предсказывала neutral или joy.</li>
+<li>Улучшенные аудиопризнаки (энергия, динамика Δ/ΔΔ, обрезка тишины) дают cross-attention более информативные K/V; вклад аудио в MELD традиционно меньше вклада текста.</li>
+<li>Редкие классы (fear, disgust — около 2 % данных) остаются самыми сложными; это видно по F1 по классам и матрице ошибок.</li>
+<li>Дальнейшие шаги: контекст диалога (<code>--context-turns 2</code>), взвешенная функция потерь для редких классов, предобученный аудиоэнкодер (wav2vec2 / HuBERT).</li>
+</ul>
+<p class="note">Сырые данные: <a href="/metrics">/metrics</a> (метрики теста), <a href="/history">/history</a> (метрики по эпохам).</p>
+</section>
+
+</main>
+</body>
+</html>
